@@ -1,9 +1,14 @@
 import sqlite3
+import os
 import random
 from datetime import datetime, timedelta
 from faker import Faker
 import uuid
 import json
+import string
+
+# Database file path
+DB_FILE = "ecommerce.db"
 
 def generate_product_name(category, brand):
     """Generate a realistic product name"""
@@ -13,57 +18,92 @@ def generate_product_name(category, brand):
     return f"{brand} {random.choice(adjectives)} {category} {random.choice(specs)}"
 
 def init_database():
-    fake = Faker()
-    conn = sqlite3.connect("ecommerce.db")
-    cursor = conn.cursor()
-
-    # Create products table with comprehensive information
-    cursor.execute("DROP TABLE IF EXISTS products")
-    cursor.execute("""
-    CREATE TABLE products (
-        sku TEXT PRIMARY KEY,                    -- Unique product identifier (e.g., SKU-A12B34CD)
-        name TEXT NOT NULL,                      -- Full product name (e.g., Dell Pro Laptop Gaming)
-        category TEXT NOT NULL,                  -- Product category (e.g., Laptops, Monitors)
-        brand TEXT NOT NULL,                     -- Manufacturer (e.g., Dell, HP, Apple)
-        base_price DECIMAL(10,2) NOT NULL,       -- Standard retail price
-        current_price DECIMAL(10,2) NOT NULL,    -- Current selling price (may differ from base price)
-        stock_quantity INTEGER NOT NULL,         -- Current inventory level
-        status TEXT CHECK(                       -- Product availability status
-            status IN ('in_stock', 'low_stock', 'out_of_stock', 'discontinued')
-        ),
-        specifications JSON NOT NULL,            -- Technical specifications as JSON
-        description TEXT,                        -- Detailed product description
-        release_day INTEGER CHECK(release_day BETWEEN 1 AND 31),    -- Day of release
-        release_month INTEGER CHECK(release_month BETWEEN 1 AND 12), -- Month of release
-        release_year INTEGER,                    -- Year of release
-        last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP  -- Last record update time
-    )
-    """)
-
-    # Define product categories and brands
-    categories = [
-        'Laptops', 'Desktop PCs', 'Monitors', 'Keyboards', 'Mice',
-        'Headphones', 'Speakers', 'Webcams', 'Printers', 'Storage'
-    ]
+    """Initialize the database if it doesn't exist, otherwise just connect to it"""
     
-    brands = {
-        'Laptops': ['Dell', 'HP', 'Lenovo', 'Apple', 'ASUS', 'Acer'],
-        'Desktop PCs': ['Dell', 'HP', 'Lenovo', 'Apple', 'ASUS'],
-        'Monitors': ['Dell', 'LG', 'Samsung', 'ASUS', 'BenQ'],
-        'Keyboards': ['Logitech', 'Razer', 'Corsair', 'HyperX', 'SteelSeries'],
-        'Mice': ['Logitech', 'Razer', 'Corsair', 'SteelSeries'],
-        'Headphones': ['Sony', 'Bose', 'Sennheiser', 'JBL', 'Apple'],
-        'Speakers': ['Bose', 'JBL', 'Sonos', 'Logitech', 'Harman Kardon'],
-        'Webcams': ['Logitech', 'Microsoft', 'Razer', 'ASUS'],
-        'Printers': ['HP', 'Epson', 'Canon', 'Brother'],
-        'Storage': ['Samsung', 'Western Digital', 'Seagate', 'Crucial', 'Kingston']
-    }
+    db_exists = os.path.exists(DB_FILE)
+    
+    # Connect to the database (creates it if it doesn't exist)
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    # Only create tables and populate with data if the database doesn't exist
+    if not db_exists:
+        print(f"Creating new database: {DB_FILE}")
+        
+        # Create tables
+        create_tables(cursor)
+        
+        # Populate with sample data
+        populate_products(cursor, 1000)
+        populate_purchases(cursor, 1000)
+        
+        # Commit changes
+        conn.commit()
+        print("Database initialized with sample data.")
+    else:
+        print(f"Using existing database: {DB_FILE}")
+    
+    return conn, cursor
 
-    # Generate 1000 products
+def create_tables(cursor):
+    """Create the database tables"""
+    
+    # Create products table
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS products (
+        sku TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        category TEXT NOT NULL,
+        brand TEXT NOT NULL,
+        base_price DECIMAL(10,2) NOT NULL,
+        current_price DECIMAL(10,2) NOT NULL,
+        stock_quantity INTEGER NOT NULL,
+        status TEXT,
+        specifications JSON NOT NULL,
+        description TEXT,
+        release_day INTEGER,
+        release_month INTEGER,
+        release_year INTEGER,
+        last_updated TIMESTAMP
+    )
+    ''')
+    
+    # Create purchases table
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS purchases (
+        purchase_id TEXT PRIMARY KEY,
+        product_sku TEXT NOT NULL,
+        purchase_day INTEGER,
+        purchase_month INTEGER,
+        purchase_year INTEGER,
+        quantity INTEGER NOT NULL,
+        unit_price DECIMAL(10,2) NOT NULL,
+        total_amount DECIMAL(10,2) NOT NULL,
+        basket_id TEXT NOT NULL,
+        basket_status TEXT,
+        basket_creation_day INTEGER,
+        basket_creation_month INTEGER,
+        basket_creation_year INTEGER,
+        client_first_name TEXT NOT NULL,
+        client_last_name TEXT NOT NULL,
+        client_country TEXT NOT NULL,
+        product_name TEXT NOT NULL,
+        product_category TEXT NOT NULL,
+        product_brand TEXT NOT NULL,
+        product_specs JSON NOT NULL
+    )
+    ''')
+
+def populate_products(cursor, num_products):
+    fake = Faker()
     products_data = []
-    for _ in range(1000):
-        category = random.choice(categories)
-        brand = random.choice(brands[category])
+    for _ in range(num_products):
+        category = random.choice(['Laptops', 'Desktop PCs', 'Monitors', 'Keyboards', 'Mice',
+                                 'Headphones', 'Speakers', 'Webcams', 'Printers', 'Storage'])
+        brand = random.choice(['Dell', 'HP', 'Lenovo', 'Apple', 'ASUS', 'Acer', 'LG', 'Samsung', 'BenQ', 'Logitech',
+                               'Razer', 'Corsair', 'HyperX', 'SteelSeries', 'Sony', 'Bose', 'Sennheiser', 'JBL', 'Sonos',
+                               'Harman Kardon'])
         base_price = round(random.uniform(50, 5000), 2)
         
         # Generate realistic specifications based on category
@@ -117,51 +157,14 @@ def init_database():
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, products_data)
 
-    # Create purchases table with enhanced basket and client information
-    cursor.execute("DROP TABLE IF EXISTS purchases")
-    cursor.execute("""
-    CREATE TABLE purchases (
-        purchase_id TEXT PRIMARY KEY,        -- Format: PUR-YYYYMM-XXXXX
-        product_sku TEXT NOT NULL,           -- Reference to original product
-        
-        -- Purchase date information
-        purchase_day INTEGER CHECK(purchase_day BETWEEN 1 AND 31),
-        purchase_month INTEGER CHECK(purchase_month BETWEEN 1 AND 12),
-        purchase_year INTEGER,
-        
-        -- Product purchase details
-        quantity INTEGER NOT NULL,
-        unit_price DECIMAL(10,2) NOT NULL,
-        total_amount DECIMAL(10,2) NOT NULL,
-        
-        -- Basket information
-        basket_id TEXT NOT NULL,
-        basket_status TEXT CHECK(basket_status IN ('completed', 'pending', 'cancelled', 'refunded')),
-        basket_creation_day INTEGER CHECK(basket_creation_day BETWEEN 1 AND 31),
-        basket_creation_month INTEGER CHECK(basket_creation_month BETWEEN 1 AND 12),
-        basket_creation_year INTEGER,
-        
-        -- Client information
-        client_first_name TEXT NOT NULL,
-        client_last_name TEXT NOT NULL,
-        client_country TEXT NOT NULL,
-        
-        -- Product snapshot at purchase time
-        product_name TEXT NOT NULL,
-        product_category TEXT NOT NULL,
-        product_brand TEXT NOT NULL,
-        product_specs JSON NOT NULL,
-        
-        FOREIGN KEY (product_sku) REFERENCES products(sku)
-    )
-    """)
-
-    # Generate 1000 purchases with enhanced information
+def populate_purchases(cursor, num_purchases):
+    fake = Faker()
+    products_data = cursor.execute("SELECT sku, current_price FROM products").fetchall()
     purchases_data = []
     used_purchase_ids = set()
     basket_info = {}  # Store basket information for reuse
 
-    for _ in range(1000):
+    for _ in range(num_purchases):
         product = random.choice(products_data)
         purchase_date = fake.date_time_between(start_date='-5y')
         
@@ -195,22 +198,22 @@ def init_database():
 
         # Calculate purchase details
         quantity = random.randint(1, 5)
-        unit_price = float(product[5])
+        unit_price = float(product['current_price'])
         total_amount = quantity * unit_price
 
         # Extract relevant product specifications
-        full_specs = json.loads(product[8])
+        full_specs = json.loads(product['specifications'])
         relevant_specs = {
             "color": full_specs.get("color"),
             "dimensions": full_specs.get("dimensions")
         }
         
-        if product[2] == 'Laptops':
+        if product['category'] == 'Laptops':
             relevant_specs.update({
                 "screen_size": full_specs.get("screen_size"),
                 "processor": full_specs.get("processor")
             })
-        elif product[2] == 'Monitors':
+        elif product['category'] == 'Monitors':
             relevant_specs.update({
                 "resolution": full_specs.get("resolution"),
                 "refresh_rate": full_specs.get("refresh_rate")
@@ -218,7 +221,7 @@ def init_database():
 
         purchases_data.append((
             purchase_id,
-            product[0],                    # product_sku
+            product['sku'],                    # product_sku
             purchase_date.day,
             purchase_date.month,
             purchase_date.year,
@@ -233,9 +236,9 @@ def init_database():
             basket_data['client_first_name'],
             basket_data['client_last_name'],
             basket_data['client_country'],
-            product[1],                    # product_name
-            product[2],                    # product_category
-            product[3],                    # product_brand
+            product['name'],                    # product_name
+            product['category'],                    # product_category
+            product['brand'],                    # product_brand
             json.dumps(relevant_specs)
         ))
 
@@ -253,9 +256,12 @@ def init_database():
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, purchases_data)
 
-    # Commit changes
-    conn.commit()
-    return conn, cursor
-
 if __name__ == "__main__":
-    init_database() 
+    # If run directly, force recreate the database
+    if os.path.exists(DB_FILE):
+        os.remove(DB_FILE)
+        print(f"Deleted existing database: {DB_FILE}")
+    
+    conn, cursor = init_database()
+    conn.close()
+    print("Database initialization complete.") 
